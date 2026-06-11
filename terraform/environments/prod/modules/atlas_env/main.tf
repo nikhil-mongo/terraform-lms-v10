@@ -34,6 +34,7 @@ resource "mongodbatlas_advanced_cluster" "env" {
     weekend_off = "saturday.sunday"
     Environment = var.environment
     deployed    = "nikhil.singh"
+    keep_until  = "2026-06-12"
   }
 
   lifecycle {
