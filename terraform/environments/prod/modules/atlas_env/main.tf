@@ -8,7 +8,7 @@ resource "mongodbatlas_project" "env" {
 
 resource "mongodbatlas_advanced_cluster" "env" {
   project_id     = mongodbatlas_project.env.id
-  name           = "${var.environment}-newcluster"
+  name           = "${var.environment}-cluster"
   cluster_type   = "REPLICASET"
   backup_enabled = var.enable_backup
 
