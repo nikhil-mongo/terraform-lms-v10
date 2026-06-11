@@ -1,0 +1,133 @@
+# V10 Demo — .github/workflows/terraform.yml
+# ===========================================
+# TALK TRACK: "This is a real GitHub Actions workflow for Atlas + Terraform.
+# Three stages: validate (on PR), plan (on PR), apply (on merge to main with approval)."
+
+name: "Terraform — MongoDB Atlas"
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["terraform/**"]
+  push:
+    branches: [main]
+    paths: ["terraform/**"]
+
+env:
+  TF_VERSION: "1.7.5"
+
+# ── NOTE: defaults.run.working-directory does NOT support ${{ env.* }} expressions.
+# The path must be a hardcoded string here. Each job also sets its own
+# defaults block as a belt-and-braces measure.
+# ──────────────────────────────────────────────────────────────────────
+
+jobs:
+  # ── STAGE 1: Validate (runs on every PR) ──────────────────────────────
+  validate:
+    name: "Validate"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/environments/prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init -backend=false # skip backend for validation
+
+      - name: Terraform Format Check
+        run: terraform fmt --check --recursive
+        # Blocks the PR if any .tf file is not properly formatted
+
+      - name: Terraform Validate
+        run: terraform validate
+        # Checks syntax and internal consistency
+
+  # ── STAGE 2: Plan (runs on every PR) ──────────────────────────────────
+  plan:
+    name: "Plan"
+    runs-on: ubuntu-latest
+    needs: [validate]
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: terraform/environments/prod
+    env:
+      # AWS credentials — used by the S3 backend and AWS provider
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }} # only needed for temporary credentials
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color -out=plan.tfplan
+        continue-on-error: true # let the next step post the comment even on failure
+
+      - name: Post Plan to PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `#### Terraform Plan 📋
+            \`\`\`
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+            *Triggered by: @${{ github.actor }}*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Fail on plan error
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  # ── STAGE 3: Apply (runs on push to main, requires approval) ──────────
+  apply:
+    name: "Apply"
+    runs-on: ubuntu-latest
+    needs: [validate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    defaults:
+      run:
+        working-directory: terraform/environments/prod
+    # This environment requires a manual approval in GitHub before apply runs.
+    # Configure required reviewers under: Settings → Environments → production
+    environment:
+      name: production
+    env:
+      # AWS credentials
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }} # only needed for temporary credentials
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+        # -auto-approve is safe here because the GitHub Environment gate
+        # already required a human to click "Approve and deploy" before this runs
