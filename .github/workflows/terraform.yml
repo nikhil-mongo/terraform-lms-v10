@@ -75,7 +75,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -no-color -out=plan.tfplan
+        run: terraform plan -no-color -out=plan.tfplan -lock=false
         continue-on-error: true # let the next step post the comment even on failure
 
       - name: Post Plan to PR
@@ -128,6 +128,6 @@ jobs:
         run: terraform init
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve -lock=false
         # -auto-approve is safe here because the GitHub Environment gate
         # already required a human to click "Approve and deploy" before this runs
